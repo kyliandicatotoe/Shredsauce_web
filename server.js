@@ -1,24 +1,20 @@
 import express from 'express';
-import axios from 'axios';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 const app = express();
-app.use(express.static('public'));
 
-app.get('/start-game', async (req, res) => {
-  try {
-    const response = await axios.post(
-      'https://engine.hyperbeam.com/v0/vm',
-      { start_url: 'https://shredsauce.com' },
-      { headers: { Authorization: `Bearer ${process.env.HB_API_KEY}` } }
-    );
-    res.json({ url: response.data.embed_url });
-  } catch (error) {
-    res.status(500).json({
-      status: error.response?.status,
-      details: error.response?.data || error.message
-    });
-  }
-});
+app.use(
+  '/',
+  createProxyMiddleware({
+    target: 'https://shredsauce.com',
+    changeOrigin: true,
+    ws: true,
+    onProxyRes: (proxyRes) => {
+      delete proxyRes.headers['x-frame-options'];
+      delete proxyRes.headers['content-security-policy'];
+    }
+  })
+);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
