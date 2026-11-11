@@ -4,6 +4,35 @@ const axios = require('axios');
 const app = express();
 app.use(express.raw({ type: '*/*', limit: '50mb' }));
 
+const interceptorScript = `
+<script>
+(function() {
+  const myOrigin = window.location.origin;
+  const rewrite = (url) => {
+    if (typeof url === 'string') {
+      return url.replace(/^https?:\\/\\/(www\\.)?shredsauce\\.com/i, myOrigin);
+    }
+    return url;
+  };
+
+  const origFetch = window.fetch;
+  window.fetch = function(input, init) {
+    if (typeof input === 'string') {
+      input = rewrite(input);
+    } else if (input && input.url) {
+      input = new Request(rewrite(input.url), input);
+    }
+    return origFetch.call(this, input, init);
+  };
+
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    return origOpen.call(this, method, rewrite(url), ...rest);
+  };
+})();
+</script>
+`;
+
 app.use(async (req, res) => {
   try {
     const targetUrl = `https://shredsauce.com${req.originalUrl}`;
@@ -45,10 +74,16 @@ app.use(async (req, res) => {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
 
-    // Rewrite hardcoded shredsauce.com URLs inside HTML and JS files so everything routes through Render
-    if (contentType.includes('text/html') || contentType.includes('javascript') || contentType.includes('json')) {
+    if (contentType.includes('text/html')) {
+      let html = Buffer.from(response.data).toString('utf8');
+      html = html.replace(/https?:\/\/(www\.)?shredsauce\.com/gi, myHost);
+      html = html.replace(/<head>/i, `<head>${interceptorScript}`);
+      return res.status(response.status).send(html);
+    }
+
+    if (contentType.includes('javascript') || contentType.includes('json')) {
       let text = Buffer.from(response.data).toString('utf8');
-      text = text.replace(/https?:\/\/(www\.)?shredsauce\.com/g, myHost);
+      text = text.replace(/https?:\/\/(www\.)?shredsauce\.com/gi, myHost);
       return res.status(response.status).send(text);
     }
 
