@@ -4,6 +4,27 @@ const axios = require('axios');
 const app = express();
 app.use(express.raw({ type: '*/*', limit: '50mb' }));
 
+app.all('/ext-proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).send('Missing url');
+  try {
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: ['GET', 'HEAD'].includes(req.method) ? undefined : req.body,
+      responseType: 'arraybuffer',
+      maxRedirects: 5,
+      headers: { 'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0' },
+      validateStatus: () => true
+    });
+    if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(response.status).send(Buffer.from(response.data));
+  } catch (e) {
+    return res.status(502).send('External proxy error');
+  }
+});
+
 app.use(async (req, res) => {
   try {
     const targetUrl = `https://shredsauce.com${req.originalUrl}`;
@@ -33,7 +54,10 @@ app.use(async (req, res) => {
 
     Object.entries(response.headers).forEach(([key, value]) => {
       const lower = key.toLowerCase();
-      if (!['transfer-encoding', 'connection', 'content-security-policy', 'content-encoding', 'content-length'].includes(lower)) {
+      if (lower === 'set-cookie' && Array.isArray(value)) {
+        const fixedCookies = value.map(c => c.replace(/;\s*Domain=[^;]+/gi, ''));
+        res.setHeader('Set-Cookie', fixedCookies);
+      } else if (!['transfer-encoding', 'connection', 'content-security-policy', 'content-encoding', 'content-length'].includes(lower)) {
         res.setHeader(key, value);
       }
     });
@@ -50,7 +74,16 @@ app.use(async (req, res) => {
         <script>
           (function() {
             const myHost = "${myHost}";
-            const rewrite = (url) => typeof url === 'string' ? url.replace(/https?:\\/\\/(www\\.)?shredsauce\\.com/g, myHost) : url;
+            const rewrite = (url) => {
+              if (typeof url !== 'string') return url;
+              if (/^https?:\\/\\/(www\\.)?shredsauce\\.com/i.test(url)) {
+                return url.replace(/^https?:\\/\\/(www\\.)?shredsauce\\.com/i, myHost);
+              }
+              if (/^https?:\\/\\//i.test(url) && !url.startsWith(myHost)) {
+                return myHost + '/ext-proxy?url=' + encodeURIComponent(url);
+              }
+              return url;
+            };
             const origFetch = window.fetch;
             window.fetch = function(input, init) {
               if (typeof input === 'string') input = rewrite(input);
