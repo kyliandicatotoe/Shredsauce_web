@@ -1,1 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Shredsauce</title>
+</head>
+<body style="margin:0; overflow:hidden; background:#000;">
+  <iframe id="game" style="width:100vw; height:100vh; border:none;" allow="autoplay; fullscreen"></iframe>
+  <script>
+    fetch('/start-game')
+      .then(res => res.json())
+      .then(data => {
+        if (data.url) document.getElementById('game').src = data.url;
+      });
+  </script>
+</body>
+</html>
 
