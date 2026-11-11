@@ -9,13 +9,20 @@ app.get('/start-game', async (req, res) => {
     const response = await axios.post(
       'https://hyperbeam.com',
       { start_url: 'https://shredsauce.com' },
-      { headers: { Authorization: `Bearer ${process.env.HB_API_KEY}` } }
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HB_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
     );
-    res.json({ url: response.data.embed_url });
+    res.json({ url: response.data.embed_url, raw: response.data });
   } catch (error) {
     res.status(500).json({
       status: error.response?.status,
-      details: error.response?.data || error.message
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message
     });
   }
 });
