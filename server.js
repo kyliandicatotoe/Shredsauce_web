@@ -4,35 +4,6 @@ const axios = require('axios');
 const app = express();
 app.use(express.raw({ type: '*/*', limit: '50mb' }));
 
-const interceptorScript = `
-<script>
-(function() {
-  const myOrigin = window.location.origin;
-  const rewrite = (url) => {
-    if (typeof url === 'string') {
-      return url.replace(/^https?:\\/\\/(www\\.)?shredsauce\\.com/i, myOrigin);
-    }
-    return url;
-  };
-
-  const origFetch = window.fetch;
-  window.fetch = function(input, init) {
-    if (typeof input === 'string') {
-      input = rewrite(input);
-    } else if (input && input.url) {
-      input = new Request(rewrite(input.url), input);
-    }
-    return origFetch.call(this, input, init);
-  };
-
-  const origOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-    return origOpen.call(this, method, rewrite(url), ...rest);
-  };
-})();
-</script>
-`;
-
 app.use(async (req, res) => {
   try {
     const targetUrl = `https://shredsauce.com${req.originalUrl}`;
@@ -42,12 +13,9 @@ app.use(async (req, res) => {
       Origin: 'https://shredsauce.com'
     };
 
-    if (req.headers.range) {
-      forwardHeaders.Range = req.headers.range;
-    }
-    if (req.headers['content-type']) {
-      forwardHeaders['Content-Type'] = req.headers['content-type'];
-    }
+    if (req.headers.range) forwardHeaders.Range = req.headers.range;
+    if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
+    if (req.headers.cookie) forwardHeaders.Cookie = req.headers.cookie;
 
     const response = await axios({
       method: req.method,
@@ -76,14 +44,33 @@ app.use(async (req, res) => {
 
     if (contentType.includes('text/html')) {
       let html = Buffer.from(response.data).toString('utf8');
-      html = html.replace(/https?:\/\/(www\.)?shredsauce\.com/gi, myHost);
-      html = html.replace(/<head>/i, `<head>${interceptorScript}`);
+      html = html.replace(/https?:\/\/(www\.)?shredsauce\.com/g, myHost);
+
+      const interceptor = `
+        <script>
+          (function() {
+            const myHost = "${myHost}";
+            const rewrite = (url) => typeof url === 'string' ? url.replace(/https?:\\/\\/(www\\.)?shredsauce\\.com/g, myHost) : url;
+            const origFetch = window.fetch;
+            window.fetch = function(input, init) {
+              if (typeof input === 'string') input = rewrite(input);
+              else if (input instanceof Request) input = new Request(rewrite(input.url), input);
+              return origFetch.call(this, input, init);
+            };
+            const origOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+              return origOpen.call(this, method, rewrite(url), ...rest);
+            };
+          })();
+        </script>
+      `;
+      html = html.replace('<head>', `<head>${interceptor}`);
       return res.status(response.status).send(html);
     }
 
     if (contentType.includes('javascript') || contentType.includes('json')) {
       let text = Buffer.from(response.data).toString('utf8');
-      text = text.replace(/https?:\/\/(www\.)?shredsauce\.com/gi, myHost);
+      text = text.replace(/https?:\/\/(www\.)?shredsauce\.com/g, myHost);
       return res.status(response.status).send(text);
     }
 
